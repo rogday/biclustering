@@ -7,6 +7,12 @@
 #include <sstream>
 #include <algorithm>
 #include <filesystem>
+#include <numeric>
+#include <random>
+#include <exception>
+#include <stdexcept>
+
+#define DEBUG 1
 
 class biclustering_solver_t {
 
@@ -37,10 +43,12 @@ public:
     std::getline(filestream, line);
     auto dimensions = split(line);
 
+    machines_clusters.resize(dimensions[0]);
+    parts_clusters.resize(dimensions[1]);
+
     matrix.resize(dimensions[0]);
     std::fill(std::begin(matrix), std::end(matrix),
               std::vector<cell_t>(dimensions[1]));
-
     while (std::getline(filestream, line)) {
       auto vector = split(line);
       ones_overall += vector.size() - 1;
@@ -48,99 +56,84 @@ public:
         matrix[vector[0] - 1][vector[i] - 1].value = true;
     }
 
+#ifdef DEBUG
     for (auto &vector : matrix) {
       for (auto &element : vector)
         std::cout << element.value << " ";
       std::cout << std::endl;
     }
+#endif
   }
 
-  two_dim_matrix_t get_partial_sum() {
-    std::size_t n = matrix.size() + 1, m = matrix[0].size() + 1;
-    two_dim_matrix_t greedy_matrix(n, std::vector<cell_t>(m));
+  void initial_random() {
 
-    for (std::size_t i = 1; i < n; ++i)
-      for (std::size_t j = 1; j < m; ++j)
-        greedy_matrix[i][j].value =
-            matrix[i - 1][j - 1].value + greedy_matrix[i - 1][j].value +
-            greedy_matrix[i][j - 1].value - greedy_matrix[i - 1][j - 1].value;
+    std::vector<std::size_t> machines(matrix.size());
+    std::vector<std::size_t> parts(matrix[0].size());
 
-    return greedy_matrix;
-  }
+    std::iota(std::begin(machines), std::end(machines), 0);
+    std::iota(std::begin(parts), std::end(parts), 0);
 
-  void greedy_clustering() {
-    std::size_t n = matrix.size() + 1, m = matrix[0].size() + 1;
-    double sum = std::numeric_limits<double>::min();
+    std::mt19937 prng(std::random_device{}());
 
-    two_dim_matrix_t greedy_matrix = get_partial_sum();
+    std::shuffle(std::begin(machines), std::end(machines), prng);
+    std::shuffle(std::begin(parts), std::end(parts), prng);
 
-    //количество_единичек_в_кластере/(количество_единичек_всего +
-    //количество_ноликов_во_всех_кластерах)
+    std::size_t i = 0; // i - сколько уже сгенерили для машин
+    std::size_t j = 0; // j - сколько уже сгенерили для частей
+    std::size_t clusters = 1 + prng() % machines_clusters.size();
+    for (std::size_t cluster = 0, cluster_id = 2; cluster < clusters;
+         ++cluster, ++cluster_id) {
 
-    /** ones_in_cluster/zeros_in_cluster -
-        (ones_left_in_rows/zeros_left_in_rows +
-        ones_left_in_cols/zeros_left_in_cols) */
+           //меня в цс позвали. я пойду одну катку проебу с
 
-    std::size_t start_i, start_j, end_i, end_j;
-    for (std::size_t i = 0; i < n; ++i)
-      for (std::size_t j = 0; j < m; ++j)
-        for (std::size_t di = 0; di < n - i; ++di)
-          for (std::size_t dj = 0; dj < m - j; ++dj) {
-            std::int64_t ones_in_cluster =
-                get_sum_inclusive(greedy_matrix, di, dj, di + i, dj + j);
+      std::size_t cluster_size_machines =
+          1 + prng() % (machines_clusters.size() - clusters - i);
 
-            std::int64_t zeros_in_cluster = i * j - ones_in_cluster;
+      std::size_t cluster_size_parts =
+          1 + prng() % (machines_clusters.size() - clusters - j);
 
-            std::int64_t ones_left_in_rows =
-                get_sum_inclusive(greedy_matrix, 0, dj, n - 1, dj + j) -
-                ones_in_cluster;
+      std::cout << "cluster_size_machines: " << cluster_size_machines
+                << ", cluster_size_parts:" << cluster_size_parts << std::endl;
 
-            std::int64_t zeros_left_in_rows = j * n - ones_left_in_rows;
+      //блять, чё не так?
+      //оно, кажется, сегфолтится
 
-            std::int64_t ones_left_in_cols =
-                get_sum_inclusive(greedy_matrix, di, 0, di + i, m - 1) -
-                ones_in_cluster;
+      // machines[x] и parts[y] можно сделать в последний момент, кмк
+      //сначала пофиксим то, что уже траблы создаёт
+      for (std::size_t x = i; x < cluster_size_machines; ++x)
+        machines_clusters[x] = cluster_id;
 
-            std::int64_t zeros_left_in_cols = i * m - ones_left_in_cols;
+      for (std::size_t y = j; y < cluster_size_parts; ++y)
+        parts_clusters[y] = cluster_id;
 
-            double loss =
-                (ones_in_cluster / (zeros_in_cluster + 1.0)) /
-                (ones_left_in_rows / (zeros_left_in_rows + 1.0) +
-                 ones_left_in_cols / (zeros_left_in_cols + 1.0) + 1.0);
-
-            if (loss > sum) {
-              sum = loss;
-              start_i = di + 1;
-              start_j = dj + 1;
-              end_i = di + i;
-              end_j = dj + j;
-            }
-          }
-    std::cout << std::endl
-              << start_i << ", " << start_j << std::endl
-              << end_i << ", " << end_j << std::endl
-              << std::endl;
-
-    for (auto i = start_i; i <= end_i; ++i) {
-      for (auto j = start_j; j <= end_j; ++j) {
-        std::cout << matrix[i - 1][j - 1].value << " ";
-      }
-      std::cout << std::endl;
+      i += cluster_size_machines;
+      j += cluster_size_parts;
     }
 
-    std::cout << std::endl << sum << " " << ones_overall << std::endl;
-  }
+    std::cout << "[DEBUG]: \n"
+                 "machines: "
+              << std::endl;
 
-  std::int64_t get_sum_inclusive(two_dim_matrix_t &mat, std::size_t start_i,
-                                 std::size_t start_j, std::size_t end_i,
-                                 std::size_t end_j) {
-    return mat[end_i][end_j].value - mat[start_i][end_j].value -
-           mat[end_i][start_j].value + mat[start_i][start_j].value;
+    for (std::size_t index = 0; index < machines_clusters.size(); ++index) {
+      std::cout << machines_clusters[index] << " ";
+    }
+
+    std::cout << "\n\nparts: " << std::endl;
+
+    for (std::size_t index = 0; index < parts_clusters.size(); ++index) {
+      std::cout << parts_clusters[index] << " ";
+    }
   }
 
 private:
   std::int64_t ones_overall = 0;
+
+  std::vector<std::size_t> machines_clusters;
+  std::vector<std::size_t> parts_clusters;
+
   two_dim_matrix_t matrix;
+  two_dim_matrix_t greedy_matrix;
+
   std::string filename;
 };
 
@@ -161,13 +154,5 @@ int main(int argc, char *argv[]) {
   biclustering_solver.parse(input_files[i]);
   std::cout << std::endl << std::endl;
 
-  auto greedy_matrix = biclustering_solver.get_partial_sum();
-
-  for (auto &vector : greedy_matrix) {
-    for (auto &element : vector)
-      std::cout << element.value << " ";
-    std::cout << std::endl;
-  }
-
-  biclustering_solver.greedy_clustering();
+  biclustering_solver.initial_random();
 }
