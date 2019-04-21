@@ -84,7 +84,9 @@ public:
     for (std::size_t cluster = 0, cluster_id = 2; cluster < clusters;
          ++cluster, ++cluster_id) {
 
-           //меня в цс позвали. я пойду одну катку проебу с
+      //меня в цс позвали. я пойду одну катку проебу я через десять минут домой
+      //поеду, приду и нормально уже можно будет писать
+      // окей, я отсоединюясь я пока стешу это дерьмо kk
 
       std::size_t cluster_size_machines =
           1 + prng() % (machines_clusters.size() - clusters - i);
