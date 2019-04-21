@@ -12,8 +12,6 @@
 #include <exception>
 #include <stdexcept>
 
-#define DEBUG 1
-
 class biclustering_solver_t {
 
   std::vector<std::int64_t> split(std::string const &str) {
@@ -80,48 +78,51 @@ public:
 
     std::size_t i = 0; // i - сколько уже сгенерили для машин
     std::size_t j = 0; // j - сколько уже сгенерили для частей
-    std::size_t clusters = 1 + prng() % machines_clusters.size();
-    for (std::size_t cluster = 0, cluster_id = 2; cluster < clusters;
-         ++cluster, ++cluster_id) {
 
-      //меня в цс позвали. я пойду одну катку проебу я через десять минут домой
-      //поеду, приду и нормально уже можно будет писать
-      // окей, я отсоединюясь я пока стешу это дерьмо kk
+    std::size_t cluster_id = 1;
+    std::size_t clusters = 1 + prng() % machines_clusters.size();
+
+    std::cout << "clusters: " << clusters << std::endl << std::endl;
+
+    for (std::size_t cluster = 1; cluster < clusters; ++cluster, ++cluster_id) {
+
+      std::cout << (machines_clusters.size() - (clusters - cluster) - i) << " "
+                << (parts_clusters.size() - (clusters - cluster) - j)
+                << std::endl;
 
       std::size_t cluster_size_machines =
-          1 + prng() % (machines_clusters.size() - clusters - i);
+          1 + prng() % (machines_clusters.size() - (clusters - cluster) - i);
 
       std::size_t cluster_size_parts =
-          1 + prng() % (machines_clusters.size() - clusters - j);
+          1 + prng() % (parts_clusters.size() - (clusters - cluster) - j);
 
       std::cout << "cluster_size_machines: " << cluster_size_machines
                 << ", cluster_size_parts:" << cluster_size_parts << std::endl;
 
-      //блять, чё не так?
-      //оно, кажется, сегфолтится
+      for (std::size_t x = i; x < i + cluster_size_machines; ++x)
+        machines_clusters[machines[x]] = cluster_id;
 
-      // machines[x] и parts[y] можно сделать в последний момент, кмк
-      //сначала пофиксим то, что уже траблы создаёт
-      for (std::size_t x = i; x < cluster_size_machines; ++x)
-        machines_clusters[x] = cluster_id;
-
-      for (std::size_t y = j; y < cluster_size_parts; ++y)
-        parts_clusters[y] = cluster_id;
+      for (std::size_t y = j; y < j + cluster_size_parts; ++y)
+        parts_clusters[parts[y]] = cluster_id;
 
       i += cluster_size_machines;
       j += cluster_size_parts;
+
+      std::cout << "i: " << i << ", j: " << j << std::endl;
     }
 
-    std::cout << "[DEBUG]: \n"
-                 "machines: "
-              << std::endl;
+    for (std::size_t x = i; x < machines_clusters.size(); ++x)
+      machines_clusters[machines[x]] = cluster_id;
 
+    for (std::size_t y = j; y < parts_clusters.size(); ++y)
+      parts_clusters[parts[y]] = cluster_id;
+
+    std::cout << "machines: " << std::endl;
     for (std::size_t index = 0; index < machines_clusters.size(); ++index) {
       std::cout << machines_clusters[index] << " ";
     }
 
     std::cout << "\n\nparts: " << std::endl;
-
     for (std::size_t index = 0; index < parts_clusters.size(); ++index) {
       std::cout << parts_clusters[index] << " ";
     }
