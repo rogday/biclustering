@@ -12,6 +12,8 @@
 #include <exception>
 #include <stdexcept>
 
+//#define DEBUG 0
+
 class biclustering_solver_t {
 
   std::vector<std::int64_t> split(std::string const &str) {
@@ -42,7 +44,10 @@ public:
     auto dimensions = split(line);
 
     machines_clusters.resize(dimensions[0]);
+    machines_clusters_indices.resize(dimensions[0]);
+
     parts_clusters.resize(dimensions[1]);
+    parts_clusters_indices.resize(dimensions[1]);
 
     matrix.resize(dimensions[0]);
     std::fill(std::begin(matrix), std::end(matrix),
@@ -63,6 +68,19 @@ public:
 #endif
   }
 
+  void clear() {
+    clusters = 0;
+    ones_overall = 0;
+
+    machines_clusters.clear();
+    parts_clusters.clear();
+
+    machines_clusters_indices.clear();
+    parts_clusters_indices.clear();
+
+    matrix.clear();
+  }
+
   void initial_random() {
 
     std::vector<std::size_t> machines(matrix.size());
@@ -80,15 +98,19 @@ public:
     std::size_t j = 0; // j - сколько уже сгенерили для частей
 
     std::size_t cluster_id = 1;
-    std::size_t clusters = 1 + prng() % machines_clusters.size();
-
-    std::cout << "clusters: " << clusters << std::endl << std::endl;
+    clusters = 1 + prng() % machines_clusters.size();
+#ifdef DEBUG
+    std::cout << "clusters: " << clusters << std::endl;
+#endif
+    auto set_clusters = [&cluster_id](auto &outer, auto &inner, auto &_,
+                                      std::size_t start, std::size_t end) {
+      for (std::size_t index = start; index < end; ++index) {
+        outer[inner[index]] = cluster_id;
+        _[cluster_id - 1].push_back(index);
+      }
+    };
 
     for (std::size_t cluster = 1; cluster < clusters; ++cluster, ++cluster_id) {
-
-      std::cout << (machines_clusters.size() - (clusters - cluster) - i) << " "
-                << (parts_clusters.size() - (clusters - cluster) - j)
-                << std::endl;
 
       std::size_t cluster_size_machines =
           1 + prng() % (machines_clusters.size() - (clusters - cluster) - i);
@@ -96,46 +118,83 @@ public:
       std::size_t cluster_size_parts =
           1 + prng() % (parts_clusters.size() - (clusters - cluster) - j);
 
-      std::cout << "cluster_size_machines: " << cluster_size_machines
-                << ", cluster_size_parts:" << cluster_size_parts << std::endl;
-
-      for (std::size_t x = i; x < i + cluster_size_machines; ++x)
-        machines_clusters[machines[x]] = cluster_id;
-
-      for (std::size_t y = j; y < j + cluster_size_parts; ++y)
-        parts_clusters[parts[y]] = cluster_id;
+      set_clusters(machines_clusters, machines, machines_clusters_indices, i,
+                   i + cluster_size_machines);
+      set_clusters(parts_clusters, parts, parts_clusters_indices, j,
+                   j + cluster_size_parts);
 
       i += cluster_size_machines;
       j += cluster_size_parts;
-
-      std::cout << "i: " << i << ", j: " << j << std::endl;
     }
 
-    for (std::size_t x = i; x < machines_clusters.size(); ++x)
-      machines_clusters[machines[x]] = cluster_id;
+    set_clusters(machines_clusters, machines, machines_clusters_indices, i,
+                 machines_clusters.size());
+    set_clusters(parts_clusters, parts, parts_clusters_indices, j,
+                 parts_clusters.size());
 
-    for (std::size_t y = j; y < parts_clusters.size(); ++y)
-      parts_clusters[parts[y]] = cluster_id;
-
+#ifdef DEBUG
     std::cout << "machines: " << std::endl;
     for (std::size_t index = 0; index < machines_clusters.size(); ++index) {
       std::cout << machines_clusters[index] << " ";
     }
+#endif
 
+#ifdef DEBUG
     std::cout << "\n\nparts: " << std::endl;
     for (std::size_t index = 0; index < parts_clusters.size(); ++index) {
       std::cout << parts_clusters[index] << " ";
     }
+#endif
   }
 
-private:
+  double print_shit() {
+    // 1 в решении/(всего 1 + нулей в решении)
+    auto test = matrix;
+
+    std::size_t ones = 0;
+    std::size_t zeros_in_solution = 0;
+    std::size_t ones_in_solution = 0;
+
+    for (std::size_t cluster = 0; cluster < clusters; ++cluster) {
+      auto &machines = machines_clusters_indices[cluster];
+      auto &parts = parts_clusters_indices[cluster];
+
+      for (std::size_t i : machines)
+        for (std::size_t j : parts) {
+          ones_in_solution += test[i][j].value;
+          zeros_in_solution += (test[i][j].value == 0) ? 1 : 0;
+          test[i][j].value = cluster + 2;
+        }
+    }
+
+    for (std::size_t i = 0; i < matrix.size(); ++i) {
+      for (std::size_t j = 0; j < matrix[0].size(); ++j) {
+        ones += matrix[i][j].value;
+#ifdef DEBUG
+        std::cout << test[i][j].value << " ";
+#endif
+      }
+#ifdef DEBUG
+      std::cout << std::endl;
+#endif
+    }
+    double f = ones_in_solution / double(ones + zeros_in_solution);
+    // std::cout << f << std::endl;
+    return f;
+  }
+
+public:
   std::int64_t ones_overall = 0;
 
   std::vector<std::size_t> machines_clusters;
   std::vector<std::size_t> parts_clusters;
 
+  std::vector<std::vector<std::size_t>> machines_clusters_indices;
+  std::vector<std::vector<std::size_t>> parts_clusters_indices;
+
   two_dim_matrix_t matrix;
-  two_dim_matrix_t greedy_matrix;
+
+  std::size_t clusters;
 
   std::string filename;
 };
@@ -154,8 +213,22 @@ int main(int argc, char *argv[]) {
   std::size_t i = ((argc == 1) ? 0 : std::atoi(argv[1])) % input_files.size();
   // for (auto &file : input_files)
   // biclustering_solver.parse(file);
-  biclustering_solver.parse(input_files[i]);
-  std::cout << std::endl << std::endl;
 
-  biclustering_solver.initial_random();
+  // std::cout << std::endl << std::endl;
+  static constexpr auto ITERATIONS = 1'000'000;
+  double maximum = std::numeric_limits<double>::min();
+  auto matrix = biclustering_solver.matrix;
+  for (std::size_t index = 0; index < ITERATIONS; ++index) {
+    biclustering_solver.clear();
+    biclustering_solver.parse(input_files[i]);
+    biclustering_solver.initial_random();
+    auto evaluation = biclustering_solver.print_shit();
+    if (evaluation > maximum) {
+      std::cout << maximum << std::endl;
+      maximum = evaluation;
+    }
+  }
+  std::cout << "max: " << maximum;
+
+  biclustering_solver.print_shit();
 }
