@@ -215,7 +215,7 @@ int main(int argc, char *argv[]) {
   // biclustering_solver.parse(file);
 
   // std::cout << std::endl << std::endl;
-  static constexpr auto ITERATIONS = 1'000'000;
+  static constexpr auto ITERATIONS = 10'000;
   double maximum = std::numeric_limits<double>::min();
   auto matrix = biclustering_solver.matrix;
   for (std::size_t index = 0; index < ITERATIONS; ++index) {
