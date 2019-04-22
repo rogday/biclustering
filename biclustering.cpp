@@ -12,11 +12,24 @@
 #include <exception>
 #include <stdexcept>
 
-//#define DEBUG
+#include <SFML/Graphics.hpp>
 
 constexpr std::uint64_t NOT_IN_CLUSTER = 0;
 
+namespace utility {
+std::string filename_from_path(std::string &path) {
+  return std::filesystem::path(path).stem().string();
+}
+}; // namespace utility
+
 class biclustering_solver_t {
+  struct cell_t {
+    std::uint64_t value = 0;
+    std::uint64_t cluster_id = NOT_IN_CLUSTER;
+  };
+
+  using entry_t = std::vector<std::string>;
+  template <typename T> using matrix_t = std::vector<std::vector<T>>;
 
   std::vector<std::int64_t> split(std::string const &str) {
     std::istringstream iss(str);
@@ -24,20 +37,20 @@ class biclustering_solver_t {
             std::istream_iterator<std::int64_t>{}};
   }
 
+  template <typename T>
+  void construct_matrix(std::size_t n, std::size_t m, matrix_t<T> &mat) {
+    mat.resize(n);
+    std::fill(std::begin(mat), std::end(mat), std::vector<T>(m));
+  }
+
 public:
-  struct cell_t {
-    std::uint64_t value = 0;
-    std::uint64_t cluster_id = NOT_IN_CLUSTER;
-  };
-
-  using entry_t = std::vector<std::string>;
-  using two_dim_matrix_t = std::vector<std::vector<cell_t>>;
-
-  biclustering_solver_t() = default;
+  biclustering_solver_t(sf::RenderWindow &window) : window(window){};
   biclustering_solver_t(biclustering_solver_t const &) = delete;
   biclustering_solver_t(biclustering_solver_t &&) = delete;
 
   void parse(std::string const &filename) {
+    full_clear();
+
     std::fstream filestream{filename};
     std::string line;
 
@@ -45,9 +58,9 @@ public:
     std::getline(filestream, line);
     auto dimensions = split(line);
 
-    matrix.resize(dimensions[0]);
-    std::fill(std::begin(matrix), std::end(matrix),
-              std::vector<cell_t>(dimensions[1]));
+    construct_matrix(dimensions[0], dimensions[1], rects);
+    construct_matrix(dimensions[0], dimensions[1], matrix);
+
     while (std::getline(filestream, line)) {
       auto vector = split(line);
       ones_overall += vector.size() - 1;
@@ -59,6 +72,7 @@ public:
   void full_clear() {
     clusters = 0;
     ones_overall = 0;
+    rects.clear();
     matrix.clear();
   }
 
@@ -71,7 +85,7 @@ public:
   void initial_random() {
     static constexpr auto ITERATIONS = 7'000;
 
-    two_dim_matrix_t new_matrix;
+    matrix_t<cell_t> new_matrix;
     std::int64_t new_ones_overall;
     std::size_t new_clusters;
 
@@ -94,14 +108,16 @@ public:
     matrix = new_matrix;
     ones_overall = new_ones_overall;
     clusters = new_clusters;
+
+    std::cout << "clusters: " << clusters << std::endl;
   }
 
   void random_pass() {
-    static std::vector<std::size_t> machines_clusters(matrix.size());
-    static std::vector<std::size_t> parts_clusters(matrix[0].size());
+    std::vector<std::size_t> machines_clusters(matrix.size());
+    std::vector<std::size_t> parts_clusters(matrix[0].size());
 
-    static std::vector<std::size_t> machines(matrix.size());
-    static std::vector<std::size_t> parts(matrix[0].size());
+    std::vector<std::size_t> machines(matrix.size());
+    std::vector<std::size_t> parts(matrix[0].size());
 
     std::iota(std::begin(machines), std::end(machines), 0);
     std::iota(std::begin(parts), std::end(parts), 0);
@@ -147,6 +163,8 @@ public:
           matrix[i][j].cluster_id = parts_clusters[j];
   }
 
+  void optimize() {}
+
   double loss() {
     std::size_t zeros_in_solution = 0;
     std::size_t ones_in_solution = 0;
@@ -161,37 +179,183 @@ public:
     return ones_in_solution / double(ones_overall + zeros_in_solution);
   }
 
-  void print() {
-    for (auto &vector : matrix) {
-      for (auto &element : vector)
-        std::cout << element.value << " ";
-      std::cout << std::endl;
+  void read_solution(std::string &file) {}
+
+  void check_solutions(std::vector<std::string> &files) {}
+
+  void save_data() {}
+
+  void append_loss() {}
+
+  void draw(bool new_colors = false) {
+    static std::random_device rd;
+    static unsigned int seed = rd();
+
+    seed = (new_colors) ? rd() : seed;
+
+    std::mt19937 prng(seed);
+
+    float size_i = window.getSize().x / float(matrix[0].size());
+    float size_k = window.getSize().y / float(matrix.size());
+
+    window.clear(sf::Color::Black);
+
+    float radius = 2.5;
+    std::vector<sf::Color> colors(clusters + 1);
+    colors[0] = sf::Color::White;
+
+    for (std::size_t i = 1; i <= clusters; ++i) {
+      int r = prng() % 256, g = prng() % 256, b = prng() % 256;
+      colors[i] = sf::Color(r, g, b);
     }
+
+    for (int i = 0; i < matrix.size(); ++i)
+      for (int k = 0; k < matrix[0].size(); ++k) {
+        std::size_t cluster_id = matrix[i][k].cluster_id;
+
+        rects[i][k].setSize(sf::Vector2f(size_i, size_k));
+
+        rects[i][k].setPosition(size_i * k, size_k * i);
+
+        rects[i][k].setOutlineColor(sf::Color::Black);
+        rects[i][k].setOutlineThickness(1);
+
+        rects[i][k].setFillColor(colors[cluster_id]);
+
+        if (matrix[i][k].value) {
+          sf::CircleShape circle;
+
+          circle.setFillColor(sf::Color::Black);
+          circle.setRadius(radius);
+          circle.setPosition(size_i * k - radius - size_i / 2,
+                             size_k * i - radius - size_k / 2);
+          window.draw(circle);
+        }
+
+        window.draw(rects[i][k]);
+      }
+
+    window.display();
   }
 
-public:
+private:
   std::int64_t ones_overall = 0;
 
-  two_dim_matrix_t matrix;
+  matrix_t<cell_t> matrix;
   std::size_t clusters;
+
+  sf::RenderWindow &window;
+  matrix_t<sf::RectangleShape> rects;
 
   std::string filename;
 };
 
 auto get_files(std::string path) {
-  biclustering_solver_t::entry_t files;
+  std::vector<std::string> files;
   for (auto entry : std::filesystem::directory_iterator(path))
     files.push_back(entry.path().string());
   return files;
 }
 
+void print_choice(std::vector<std::string> &map) {
+  std::size_t i = -1;
+  std::cout << std::endl;
+  while (++i != map.size())
+    std::cout << "#" << i << ": " << map[i] << std::endl;
+  std::cout << std::endl;
+}
+
+sf::RenderWindow &init_window(double size) {
+  sf::VideoMode vm = sf::VideoMode::getDesktopMode();
+  sf::ContextSettings settings;
+  settings.antialiasingLevel = 8;
+
+  static sf::RenderWindow window(
+      sf::VideoMode(int(vm.width / size), int(vm.height / size)),
+      "Biclustering",
+      sf::Style::Titlebar | sf::Style::Close | sf::Style::Resize, settings);
+
+  window.setPosition(sf::Vector2i(vm.width / 2 - vm.width / (size * 2),
+                                  vm.height / 2 - vm.height / (size * 2)));
+
+  window.setKeyRepeatEnabled(true);
+  window.setVerticalSyncEnabled(true);
+
+  return window;
+}
+
 int main(int argc, char *argv[]) {
-  biclustering_solver_t biclustering_solver;
+  auto &window = init_window(1.5);
+
+  biclustering_solver_t biclustering_solver(window);
   auto input_files = get_files("../input");
 
-  std::size_t i = ((argc == 1) ? 0 : std::atoi(argv[1])) % input_files.size();
-  // for (auto &file : input_files)
-  // biclustering_solver.parse(file);
-  biclustering_solver.parse(input_files[i]);
+  biclustering_solver.parse(input_files[0]);
   biclustering_solver.initial_random();
+
+  bool show_solution = false;
+  sf::Event event;
+  while (window.isOpen()) {
+    biclustering_solver.draw();
+
+    while (window.pollEvent(event)) {
+      switch (event.type) {
+
+      case sf::Event::KeyPressed:
+        if (event.key.code == sf::Keyboard::Escape) { //  close
+          window.close();
+        }
+        if (event.key.code == sf::Keyboard::Space) { // change colors
+          biclustering_solver.draw(true);
+        } else if (event.key.code == sf::Keyboard::O) { // optimize
+          biclustering_solver.optimize();
+          std::cout << "done" << std::endl;
+        } else if (event.key.code == sf::Keyboard::P) { // print
+          print_choice(input_files);
+        } else if (event.key.code == sf::Keyboard::H) { // filp show solution
+          show_solution ^= true;
+        } else if (event.key.code == sf::Keyboard::C) { // check sols
+          biclustering_solver.check_solutions(input_files);
+        } else if (event.key.code == sf::Keyboard::S) { // save
+          biclustering_solver.save_data();
+          biclustering_solver.append_loss();
+          std::cout << "saved" << std::endl;
+        } else if (event.key.code >= sf::Keyboard::Num0 &&
+                   event.key.code <= sf::Keyboard::Num9) { // choose file
+
+          std::size_t n = event.key.code - sf::Keyboard::Num0;
+          if (n >= input_files.size())
+            break;
+
+          std::string path = input_files[n];
+          std::string state = "optimized";
+
+          if (show_solution)
+            biclustering_solver.read_solution(path);
+          else {
+            state = "random";
+            biclustering_solver.parse(path);
+            biclustering_solver.initial_random();
+          }
+
+          std::string name = utility::filename_from_path(path) + ": " +
+                             std::to_string(biclustering_solver.loss());
+
+          window.setTitle(name);
+          std::cout << "#" << n << " " << state << " " << name << std::endl;
+        }
+
+        break;
+
+      case sf::Event::Closed:
+        window.close();
+        break;
+
+      case sf::Event::Resized:
+        sf::FloatRect visibleArea(0, 0, event.size.width, event.size.height);
+        window.setView(sf::View(visibleArea));
+        break;
+      }
+    }
+  }
 }
