@@ -11,6 +11,7 @@
 #include <random>
 #include <exception>
 #include <stdexcept>
+#include <iomanip>
 
 #include <SFML/Graphics.hpp>
 
@@ -24,7 +25,7 @@ std::string filename_from_path(std::string &path) {
 
 class biclustering_solver_t {
   struct cell_t {
-    std::uint64_t value = 0;
+    bool value = false;
     std::uint64_t cluster_id = NOT_IN_CLUSTER;
   };
 
@@ -58,7 +59,6 @@ public:
     std::getline(filestream, line);
     auto dimensions = split(line);
 
-    construct_matrix(dimensions[0], dimensions[1], rects);
     construct_matrix(dimensions[0], dimensions[1], matrix);
 
     while (std::getline(filestream, line)) {
@@ -72,7 +72,6 @@ public:
   void full_clear() {
     clusters = 0;
     ones_overall = 0;
-    rects.clear();
     matrix.clear();
   }
 
@@ -86,7 +85,6 @@ public:
     static constexpr auto ITERATIONS = 7'000;
 
     matrix_t<cell_t> new_matrix;
-    std::int64_t new_ones_overall;
     std::size_t new_clusters;
 
     double max = std::numeric_limits<double>::min();
@@ -97,7 +95,6 @@ public:
       double evaluation = loss();
       if (evaluation > max) {
         new_matrix = matrix;
-        new_ones_overall = ones_overall;
         new_clusters = clusters;
 
         max = evaluation;
@@ -106,7 +103,6 @@ public:
     }
 
     matrix = new_matrix;
-    ones_overall = new_ones_overall;
     clusters = new_clusters;
 
     std::cout << "clusters: " << clusters << std::endl;
@@ -116,16 +112,19 @@ public:
     std::vector<std::size_t> machines_clusters(matrix.size());
     std::vector<std::size_t> parts_clusters(matrix[0].size());
 
-    std::vector<std::size_t> machines(matrix.size());
-    std::vector<std::size_t> parts(matrix[0].size());
-
-    std::iota(std::begin(machines), std::end(machines), 0);
-    std::iota(std::begin(parts), std::end(parts), 0);
-
     std::mt19937 prng(std::random_device{}());
 
-    std::shuffle(std::begin(machines), std::end(machines), prng);
-    std::shuffle(std::begin(parts), std::end(parts), prng);
+    auto prepare_indices = [&prng](auto &container, std::size_t size) {
+      container.resize(size);
+      std::iota(std::begin(container), std::end(container), 0);
+      std::shuffle(std::begin(container), std::end(container), prng);
+    };
+
+    std::vector<std::size_t> machines;
+    std::vector<std::size_t> parts;
+
+    prepare_indices(machines, matrix.size());
+    prepare_indices(parts, matrix[0].size());
 
     std::size_t i = 0; // i - сколько уже сгенерили для машин
     std::size_t j = 0; // j - сколько уже сгенерили для частей
@@ -213,26 +212,25 @@ public:
       for (int k = 0; k < matrix[0].size(); ++k) {
         std::size_t cluster_id = matrix[i][k].cluster_id;
 
-        rects[i][k].setSize(sf::Vector2f(size_i, size_k));
+        sf::RectangleShape rect(sf::Vector2f(size_i, size_k));
 
-        rects[i][k].setPosition(size_i * k, size_k * i);
+        rect.setPosition(size_i * k, size_k * i);
 
-        rects[i][k].setOutlineColor(sf::Color::Black);
-        rects[i][k].setOutlineThickness(1);
+        rect.setOutlineColor(sf::Color::Black);
+        rect.setOutlineThickness(1);
 
-        rects[i][k].setFillColor(colors[cluster_id]);
+        rect.setFillColor(colors[cluster_id]);
+        window.draw(rect);
 
         if (matrix[i][k].value) {
           sf::CircleShape circle;
 
           circle.setFillColor(sf::Color::Black);
           circle.setRadius(radius);
-          circle.setPosition(size_i * k - radius - size_i / 2,
-                             size_k * i - radius - size_k / 2);
+          circle.setPosition(size_i * k - radius + size_i / 2,
+                             size_k * i - radius + size_k / 2);
           window.draw(circle);
         }
-
-        window.draw(rects[i][k]);
       }
 
     window.display();
@@ -245,7 +243,6 @@ private:
   std::size_t clusters;
 
   sf::RenderWindow &window;
-  matrix_t<sf::RectangleShape> rects;
 
   std::string filename;
 };
@@ -294,6 +291,7 @@ int main(int argc, char *argv[]) {
   biclustering_solver.initial_random();
 
   bool show_solution = false;
+
   sf::Event event;
   while (window.isOpen()) {
     biclustering_solver.draw();
