@@ -70,6 +70,11 @@ public:
 
   void initial_random() {
     static constexpr auto ITERATIONS = 7'000;
+
+    two_dim_matrix_t new_matrix;
+    std::int64_t new_ones_overall;
+    std::size_t new_clusters;
+
     double max = std::numeric_limits<double>::min();
 
     for (std::size_t index = 0; index < ITERATIONS; ++index) {
@@ -77,10 +82,18 @@ public:
       random_pass();
       double evaluation = loss();
       if (evaluation > max) {
+        new_matrix = matrix;
+        new_ones_overall = ones_overall;
+        new_clusters = clusters;
+
         max = evaluation;
         std::cout << index << " " << max << std::endl;
       }
     }
+
+    matrix = new_matrix;
+    ones_overall = new_ones_overall;
+    clusters = new_clusters;
   }
 
   void random_pass() {
