@@ -97,11 +97,11 @@ public:
   }
 
   void random_pass() {
-    std::vector<std::size_t> machines_clusters(matrix.size());
-    std::vector<std::size_t> parts_clusters(matrix[0].size());
+    static std::vector<std::size_t> machines_clusters(matrix.size());
+    static std::vector<std::size_t> parts_clusters(matrix[0].size());
 
-    std::vector<std::size_t> machines(matrix.size());
-    std::vector<std::size_t> parts(matrix[0].size());
+    static std::vector<std::size_t> machines(matrix.size());
+    static std::vector<std::size_t> parts(matrix[0].size());
 
     std::iota(std::begin(machines), std::end(machines), 0);
     std::iota(std::begin(parts), std::end(parts), 0);
