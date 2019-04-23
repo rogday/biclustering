@@ -16,10 +16,23 @@
 #include <SFML/Graphics.hpp>
 
 constexpr std::uint64_t NOT_IN_CLUSTER = 0;
+constexpr double eps = 1e-12;
 
 namespace utility {
 std::string filename_from_path(std::string &path) {
   return std::filesystem::path(path).stem().string();
+}
+
+template <typename T>
+void append_clear(std::vector<T> &to, std::vector<T> &from) {
+  to.insert(std::end(to), std::begin(from), std::end(from));
+  from.clear();
+}
+
+template <typename T>
+void split(std::vector<T> &from, std::vector<T> &to, std::size_t index) {
+  to.insert(std::end(to), std::begin(from) + index, std::end(from));
+  from.resize(index);
 }
 }; // namespace utility
 
@@ -184,8 +197,6 @@ public:
           cluster_matrix[x][y] = cluster + 1;
   }
 
-  void optimize() {}
-
   double loss() {
     std::size_t zeros_in_solution = 0;
     std::size_t ones_in_solution = 0;
@@ -199,6 +210,70 @@ public:
 
     return ones_in_solution / double(ones_overall + zeros_in_solution);
   }
+
+  void optimize() { // only merge
+    double max_loss = loss(), last_loss, current_loss;
+
+    do {
+      last_loss = max_loss;
+
+      for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1) {
+        for (std::size_t cluster2 = cluster1 + 1; cluster2 < clusters;
+             ++cluster2) {
+          std::size_t size_machines = machines_clusters[cluster1].size();
+          std::size_t size_machines2 = machines_clusters[cluster2].size();
+
+          std::size_t size_parts = parts_clusters[cluster1].size();
+          std::size_t size_parts2 = parts_clusters[cluster2].size();
+
+          merge(cluster1, cluster2);
+
+          current_loss = loss();
+          if (current_loss > max_loss) {
+            max_loss = current_loss;
+            std::cout << max_loss << std::endl;
+          }
+
+          // split(cluster1, cluster2, size_machines);
+          utility::split(machines_clusters[cluster1],
+                         machines_clusters[cluster2], size_machines);
+          utility::split(parts_clusters[cluster1], parts_clusters[cluster2],
+                         size_parts);
+
+          if (size_machines != machines_clusters[cluster1].size() ||
+              size_machines2 != machines_clusters[cluster2].size() ||
+              size_parts != parts_clusters[cluster1].size() ||
+              size_parts2 != parts_clusters[cluster2].size()) {
+            std::cout << "before: " << size_machines << " " << size_machines2
+                      << " " << size_parts << " " << size_parts2 << std::endl;
+
+            std::cout << "after: " << machines_clusters[cluster1].size() << " "
+                      << machines_clusters[cluster2].size() << " "
+                      << parts_clusters[cluster1].size() << " "
+                      << parts_clusters[cluster2].size() << std::endl;
+          }
+        }
+      }
+    } while (1.0 - last_loss / max_loss > eps);
+
+    std::cout << "max_loss: " << max_loss << std::endl;
+  }
+
+  // make separate functions for parts and machines
+  void merge(std::size_t cluster1, std::size_t cluster2) {
+    utility::append_clear(machines_clusters[cluster1],
+                          machines_clusters[cluster2]);
+    utility::append_clear(parts_clusters[cluster1], parts_clusters[cluster2]);
+  }
+
+  // make separate functions for parts and machines
+  void split(std::size_t cluster1, std::size_t cluster2, std::size_t index) {
+    utility::split(machines_clusters[cluster1], machines_clusters[cluster2],
+                   index);
+    utility::split(parts_clusters[cluster1], parts_clusters[cluster2], index);
+  }
+
+  void swap() {}
 
   void read_solution(std::string &file) {}
 
