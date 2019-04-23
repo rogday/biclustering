@@ -24,12 +24,9 @@ std::string filename_from_path(std::string &path) {
 }; // namespace utility
 
 class biclustering_solver_t {
-  struct cell_t {
-    bool value = false;
-    std::uint64_t cluster_id = NOT_IN_CLUSTER;
-  };
 
   using entry_t = std::vector<std::string>;
+  using indices_t = std::vector<std::size_t>;
   template <typename T> using matrix_t = std::vector<std::vector<T>>;
 
   std::vector<std::int64_t> split(std::string const &str) {
@@ -39,7 +36,7 @@ class biclustering_solver_t {
   }
 
   template <typename T>
-  void construct_matrix(std::size_t n, std::size_t m, matrix_t<T> &mat) {
+  void construct_matrix(matrix_t<T> &mat, std::size_t n, std::size_t m) {
     mat.resize(n);
     std::fill(std::begin(mat), std::end(mat), std::vector<T>(m));
   }
@@ -58,43 +55,54 @@ public:
     /** M, P (number of machines and parts) */
     std::getline(filestream, line);
     auto dimensions = split(line);
+    n = dimensions[0];
+    m = dimensions[1];
 
-    construct_matrix(dimensions[0], dimensions[1], matrix);
+    construct_matrix(matrix, n, m);
+    construct_matrix(cluster_matrix, n, m);
 
     while (std::getline(filestream, line)) {
       auto vector = split(line);
       ones_overall += vector.size() - 1;
       for (std::size_t i = 1; i < vector.size(); ++i)
-        matrix[vector[0] - 1][vector[i] - 1].value = true;
+        matrix[vector[0] - 1][vector[i] - 1] = true;
     }
   }
 
   void full_clear() {
-    clusters = 0;
-    ones_overall = 0;
+    clusters = ones_overall = n = m = 0;
+    machines_clusters.clear();
+    parts_clusters.clear();
     matrix.clear();
+    cluster_matrix.clear();
   }
 
   void random_clear() {
-    for (auto &vector : matrix)
-      for (auto &cell : vector)
-        cell.cluster_id = NOT_IN_CLUSTER;
+    for (auto &v : machines_clusters)
+      v.clear();
+
+    for (auto &v : parts_clusters)
+      v.clear();
   }
 
   void initial_random() {
-    static constexpr auto ITERATIONS = 7'000;
+    static constexpr auto ITERATIONS = 10'000;
 
-    matrix_t<cell_t> new_matrix;
     std::size_t new_clusters;
 
-    double max = std::numeric_limits<double>::min();
+    matrix_t<std::size_t> new_machines_clusters;
+    matrix_t<std::size_t> new_parts_clusters;
+
+    double max = std::numeric_limits<double>::lowest();
 
     for (std::size_t index = 0; index < ITERATIONS; ++index) {
       random_clear();
       random_pass();
       double evaluation = loss();
       if (evaluation > max) {
-        new_matrix = matrix;
+        new_machines_clusters = machines_clusters;
+        new_parts_clusters = parts_clusters;
+
         new_clusters = clusters;
 
         max = evaluation;
@@ -102,17 +110,33 @@ public:
       }
     }
 
-    matrix = new_matrix;
     clusters = new_clusters;
+
+    machines_clusters = new_machines_clusters;
+    parts_clusters = new_parts_clusters;
+
+    construct_cluster_matrix();
 
     std::cout << "clusters: " << clusters << std::endl;
   }
 
   void random_pass() {
-    std::vector<std::size_t> machines_clusters(matrix.size());
-    std::vector<std::size_t> parts_clusters(matrix[0].size());
-
     std::mt19937 prng(std::random_device{}());
+
+    std::size_t i = 0; // i - сколько уже сгенерили для машин
+    std::size_t j = 0; // j - сколько уже сгенерили для частей
+
+    std::size_t cluster_id = 1;
+    clusters = 1 + prng() % n;
+
+    machines_clusters.resize(clusters);
+    parts_clusters.resize(clusters);
+
+    auto set_clusters = [&cluster_id](auto &outer, auto &inner,
+                                      std::size_t start, std::size_t end) {
+      for (std::size_t index = start; index < end; ++index)
+        outer[cluster_id - 1].push_back(inner[index]);
+    };
 
     auto prepare_indices = [&prng](auto &container, std::size_t size) {
       container.resize(size);
@@ -120,31 +144,27 @@ public:
       std::shuffle(std::begin(container), std::end(container), prng);
     };
 
-    std::vector<std::size_t> machines;
-    std::vector<std::size_t> parts;
+    indices_t machines;
+    indices_t parts;
 
-    prepare_indices(machines, matrix.size());
-    prepare_indices(parts, matrix[0].size());
+    prepare_indices(machines, n);
+    prepare_indices(parts, m);
 
-    std::size_t i = 0; // i - сколько уже сгенерили для машин
-    std::size_t j = 0; // j - сколько уже сгенерили для частей
+    std::normal_distribution dist_machines(n / double(clusters),
+                                           n / double(clusters));
 
-    std::size_t cluster_id = 1;
-    clusters = 1 + prng() % machines_clusters.size();
-
-    auto set_clusters = [&cluster_id](auto &outer, auto &inner,
-                                      std::size_t start, std::size_t end) {
-      for (std::size_t index = start; index < end; ++index)
-        outer[inner[index]] = cluster_id;
-    };
+    std::normal_distribution dist_parts(m / double(clusters),
+                                        m / double(clusters));
 
     for (std::size_t cluster = 1; cluster < clusters; ++cluster, ++cluster_id) {
 
       std::size_t cluster_size_machines =
-          1 + prng() % (machines_clusters.size() - (clusters - cluster) - i);
+          std::clamp(std::uint64_t(std::round(dist_machines(prng))), 1ull,
+                     n - (clusters - cluster) - i);
 
       std::size_t cluster_size_parts =
-          1 + prng() % (parts_clusters.size() - (clusters - cluster) - j);
+          std::clamp(std::uint64_t(std::round(dist_parts(prng))), 1ull,
+                     m - (clusters - cluster) - j);
 
       set_clusters(machines_clusters, machines, i, i + cluster_size_machines);
       set_clusters(parts_clusters, parts, j, j + cluster_size_parts);
@@ -153,13 +173,15 @@ public:
       j += cluster_size_parts;
     }
 
-    set_clusters(machines_clusters, machines, i, machines_clusters.size());
-    set_clusters(parts_clusters, parts, j, parts_clusters.size());
+    set_clusters(machines_clusters, machines, i, n);
+    set_clusters(parts_clusters, parts, j, m);
+  }
 
-    for (std::size_t i = 0; i < machines_clusters.size(); ++i)
-      for (std::size_t j = 0; j < parts_clusters.size(); ++j)
-        if (machines_clusters[i] == parts_clusters[j])
-          matrix[i][j].cluster_id = parts_clusters[j];
+  void construct_cluster_matrix() {
+    for (std::size_t cluster = 0; cluster < clusters; ++cluster)
+      for (std::size_t x : machines_clusters[cluster])
+        for (std::size_t y : parts_clusters[cluster])
+          cluster_matrix[x][y] = cluster + 1;
   }
 
   void optimize() {}
@@ -168,11 +190,11 @@ public:
     std::size_t zeros_in_solution = 0;
     std::size_t ones_in_solution = 0;
 
-    for (auto &vector : matrix)
-      for (auto &cell : vector)
-        if (cell.cluster_id != NOT_IN_CLUSTER) {
-          ones_in_solution += cell.value;
-          zeros_in_solution += !cell.value;
+    for (std::size_t cluster = 0; cluster < clusters; ++cluster)
+      for (std::size_t x : machines_clusters[cluster])
+        for (std::size_t y : parts_clusters[cluster]) {
+          ones_in_solution += matrix[x][y];
+          zeros_in_solution += !matrix[x][y];
         }
 
     return ones_in_solution / double(ones_overall + zeros_in_solution);
@@ -194,8 +216,8 @@ public:
 
     std::mt19937 prng(seed);
 
-    float size_i = window.getSize().x / float(matrix[0].size());
-    float size_k = window.getSize().y / float(matrix.size());
+    float size_i = window.getSize().x / float(m);
+    float size_k = window.getSize().y / float(n);
 
     window.clear(sf::Color::Black);
 
@@ -208,9 +230,9 @@ public:
       colors[i] = sf::Color(r, g, b);
     }
 
-    for (int i = 0; i < matrix.size(); ++i)
-      for (int k = 0; k < matrix[0].size(); ++k) {
-        std::size_t cluster_id = matrix[i][k].cluster_id;
+    for (int i = 0; i < n; ++i)
+      for (int k = 0; k < m; ++k) {
+        std::size_t cluster_id = cluster_matrix[i][k];
 
         sf::RectangleShape rect(sf::Vector2f(size_i, size_k));
 
@@ -222,7 +244,7 @@ public:
         rect.setFillColor(colors[cluster_id]);
         window.draw(rect);
 
-        if (matrix[i][k].value) {
+        if (matrix[i][k]) {
           sf::CircleShape circle;
 
           circle.setFillColor(sf::Color::Black);
@@ -239,8 +261,15 @@ public:
 private:
   std::int64_t ones_overall = 0;
 
-  matrix_t<cell_t> matrix;
+  matrix_t<bool> matrix;
+  matrix_t<std::size_t> cluster_matrix;
+
+  std::size_t n;
+  std::size_t m;
+
   std::size_t clusters;
+  matrix_t<std::size_t> machines_clusters;
+  matrix_t<std::size_t> parts_clusters;
 
   sf::RenderWindow &window;
 
