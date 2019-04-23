@@ -191,6 +191,7 @@ public:
   }
 
   void construct_cluster_matrix() {
+    construct_matrix(cluster_matrix, n, m); // clear
     for (std::size_t cluster = 0; cluster < clusters; ++cluster)
       for (std::size_t x : machines_clusters[cluster])
         for (std::size_t y : parts_clusters[cluster])
@@ -214,8 +215,13 @@ public:
   void optimize() { // only merge
     double max_loss = loss(), last_loss, current_loss;
 
+    indices_t new_machines_cluster1, new_machines_cluster2, new_parts_cluster1,
+        new_parts_cluster2;
+    std::size_t i, j;
+
     do {
       last_loss = max_loss;
+      i = j = 0;
 
       for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1) {
         for (std::size_t cluster2 = cluster1 + 1; cluster2 < clusters;
@@ -230,6 +236,15 @@ public:
 
           current_loss = loss();
           if (current_loss > max_loss) {
+            new_machines_cluster1 = machines_clusters[cluster1];
+            new_machines_cluster2 = machines_clusters[cluster2];
+
+            new_parts_cluster1 = parts_clusters[cluster1];
+            new_parts_cluster2 = parts_clusters[cluster2];
+
+            i = cluster1;
+            j = cluster2;
+
             max_loss = current_loss;
             std::cout << max_loss << std::endl;
           }
@@ -243,19 +258,19 @@ public:
           if (size_machines != machines_clusters[cluster1].size() ||
               size_machines2 != machines_clusters[cluster2].size() ||
               size_parts != parts_clusters[cluster1].size() ||
-              size_parts2 != parts_clusters[cluster2].size()) {
-            std::cout << "before: " << size_machines << " " << size_machines2
-                      << " " << size_parts << " " << size_parts2 << std::endl;
-
-            std::cout << "after: " << machines_clusters[cluster1].size() << " "
-                      << machines_clusters[cluster2].size() << " "
-                      << parts_clusters[cluster1].size() << " "
-                      << parts_clusters[cluster2].size() << std::endl;
-          }
+              size_parts2 != parts_clusters[cluster2].size())
+            throw("shit");
         }
+      }
+      if (i != j) {
+        machines_clusters[i] = new_machines_cluster1;
+        machines_clusters[j] = new_machines_cluster2;
+        parts_clusters[i] = new_parts_cluster1;
+        parts_clusters[j] = new_parts_cluster2;
       }
     } while (1.0 - last_loss / max_loss > eps);
 
+    construct_cluster_matrix();
     std::cout << "max_loss: " << max_loss << std::endl;
   }
 
