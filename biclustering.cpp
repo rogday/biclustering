@@ -215,10 +215,81 @@ public:
   }
 
   void optimize() {
-    split_pass();
-    merge_pass();
+    double max_loss = std::numeric_limits<double>::lowest(), last_loss;
+
+    do {
+      last_loss = max_loss;
+
+      split_pass();
+      swap<false>();
+      swap<true>();
+      merge_pass();
+
+      max_loss = std::max(max_loss, loss());
+    } while (1.0 - last_loss / max_loss > eps);
+
     construct_cluster_matrix();
     std::cout << "clusters: " << clusters << std::endl;
+  }
+
+  template <bool Machines> void swap() {
+    double max_loss = loss(), last_loss, current_loss;
+
+    std::int64_t new_cluster1, new_cluster2, i, j;
+
+    std::reference_wrapper<matrix_t<std::size_t>> clusters_vector =
+        machines_clusters;
+
+    if constexpr (!Machines)
+      clusters_vector = parts_clusters;
+
+    do {
+      last_loss = max_loss;
+      i = j = new_cluster1 = new_cluster2 = -1;
+
+      for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1) {
+
+        if (clusters_vector.get()[cluster1].size() == 1)
+          continue;
+
+        for (std::size_t cluster2 = cluster1 + 1; cluster2 < clusters;
+             ++cluster2) {
+
+          if (clusters_vector.get()[cluster2].size() == 1)
+            continue;
+
+          for (std::size_t x = 0; x < clusters_vector.get()[cluster1].size();
+               ++x)
+            for (std::size_t y = 0; y < clusters_vector.get()[cluster2].size();
+                 ++y) {
+
+              std::swap(clusters_vector.get()[cluster1][x],
+                        clusters_vector.get()[cluster2][y]);
+
+              current_loss = loss();
+              if (current_loss > max_loss) {
+                i = x;
+                j = y;
+                new_cluster1 = cluster1;
+                new_cluster2 = cluster2;
+
+                max_loss = current_loss;
+                std::cout << max_loss << std::endl;
+              }
+
+              std::swap(clusters_vector.get()[cluster1][x],
+                        clusters_vector.get()[cluster2][y]);
+            }
+        }
+      }
+
+      if (i != -1)
+        std::swap(clusters_vector.get()[new_cluster1][i],
+                  clusters_vector.get()[new_cluster2][j]);
+
+    } while (1.0 - last_loss / max_loss > eps);
+
+    std::cout << "max_loss: " << max_loss << std::endl;
   }
 
   void split_pass() {
@@ -254,6 +325,7 @@ public:
       if (i != -1) {
         split(new_cluster, i, j);
         ++clusters;
+        // break;
       }
 
     } while (1.0 - last_loss / max_loss > eps);
@@ -300,6 +372,7 @@ public:
         machines_clusters.pop_back();
         parts_clusters.pop_back();
         --clusters;
+        // break;
       }
     } while (1.0 - last_loss / max_loss > eps);
 
@@ -313,11 +386,9 @@ public:
   }
 
   void split(std::size_t cluster, std::size_t i, std::size_t j) {
-    machines_clusters.emplace_back();
-    parts_clusters.emplace_back();
-
-    utility::split(machines_clusters[cluster], machines_clusters.back(), i);
-    utility::split(parts_clusters[cluster], parts_clusters.back(), j);
+    utility::split(machines_clusters[cluster], machines_clusters.emplace_back(),
+                   i);
+    utility::split(parts_clusters[cluster], parts_clusters.emplace_back(), j);
   }
 
   void swap() {}
