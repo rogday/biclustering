@@ -231,68 +231,57 @@ public:
 
     matrix_t<std::int64_t> solutions;
 
-    std::vector<decltype(machines_clusters)> new_machines_clusters;
-    std::vector<decltype(machines_clusters)> new_parts_clusters;
+    auto old_machines_clusters = machines_clusters;
+    auto old_parts_clusters = parts_clusters;
 
-    auto save_solution = [this, &new_machines_clusters, &new_parts_clusters]() {
-      new_machines_clusters.push_back(machines_clusters);
-      new_parts_clusters.push_back(parts_clusters);
+    auto new_machines_clusters = machines_clusters;
+    auto new_parts_clusters = parts_clusters;
+
+    auto save_solution = [&](bool flag = false) {
+      (flag ? new_machines_clusters : old_machines_clusters) =
+          machines_clusters;
+      (flag ? new_parts_clusters : old_parts_clusters) = parts_clusters;
     };
 
-    auto set_current = [this, &new_machines_clusters,
-                        &new_parts_clusters](std::size_t i) {
-      machines_clusters = new_machines_clusters[i];
-      parts_clusters = new_parts_clusters[i];
-      clusters = new_machines_clusters[i].size();
+    auto set_current = [&](bool flag) {
+      machines_clusters =
+          (flag ? new_machines_clusters : old_machines_clusters);
+      parts_clusters = (flag ? new_parts_clusters : old_parts_clusters);
+      clusters = parts_clusters.size();
     };
 
-    auto restore_original = std::bind(set_current, 0);
-
-    auto clear = [&new_machines_clusters, &new_parts_clusters]() {
-      new_machines_clusters.clear();
-      new_parts_clusters.clear();
-    };
+    auto restore_original = std::bind(set_current, false);
 
     std::vector<std::function<void()>> shakers;
     shakers.push_back(std::bind(&biclustering_solver_t::split_pass, this));
     shakers.push_back(std::bind(&biclustering_solver_t::merge_pass, this));
 
-    std::size_t index, iterations = 50;
+    std::size_t iterations = 50;
+    bool flag;
 
     do {
       last_loss = max_loss;
-      index = 0;
+      flag = false;
 
-      save_solution();
+      save_solution(false);
 
       for (std::size_t i = 0; i < neighbors; ++i) {
         for (auto &shaker : shakers) {
           shaker();
           local_search();
-          save_solution();
+
+          double current_loss = loss();
+          if (current_loss > max_loss) {
+            max_loss = current_loss;
+            flag = true;
+            save_solution(true);
+          }
+
           restore_original();
         }
       }
 
-      for (std::size_t i = 1; i < new_machines_clusters.size(); ++i) {
-        machines_clusters = new_machines_clusters[i];
-        parts_clusters = new_parts_clusters[i];
-        clusters = new_parts_clusters[i].size();
-
-        double current_loss = loss();
-
-        if (current_loss > max_loss) {
-          max_loss = current_loss;
-          index = i;
-        }
-
-        restore_original();
-      }
-
-      set_current(index);
-
-      clear();
-
+      set_current(flag);
     } while (1.0 - last_loss / max_loss > eps || iterations--);
 
     construct_cluster_matrix();
