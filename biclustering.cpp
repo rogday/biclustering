@@ -445,9 +445,9 @@ public:
 
     read_vector(machines_clusters);
     read_vector(parts_clusters);
-    construct_cluster_matrix();
+    clusters = parts_clusters.size();
 
-    std::cout << "Loss: " << loss() << std::endl;
+    construct_cluster_matrix();
     file.close();
   }
 
