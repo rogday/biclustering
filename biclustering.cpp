@@ -52,6 +52,15 @@ std::vector<std::int64_t> split(std::string const &str) {
   return {std::istream_iterator<std::int64_t>{iss},
           std::istream_iterator<std::int64_t>{}};
 }
+
+template <typename T>
+std::vector<T> flatten(const std::vector<std::vector<T>> &orig) {
+  std::vector<T> ret;
+  for (const auto &v : orig)
+    ret.insert(ret.end(), v.begin(), v.end());
+  return ret;
+}
+
 } // namespace utility
 
 class biclustering_solver_t {
@@ -85,7 +94,6 @@ public:
     m = dimensions[1];
 
     construct_matrix(matrix, n, m);
-    construct_matrix(cluster_matrix, n, m);
 
     while (std::getline(filestream, line)) {
       auto vector = utility::split(line);
@@ -204,10 +212,14 @@ public:
 
   void construct_cluster_matrix() {
     construct_matrix(cluster_matrix, n, m); // clear
+
     for (std::size_t cluster = 0; cluster < clusters; ++cluster)
       for (std::size_t x : machines_clusters[cluster])
         for (std::size_t y : parts_clusters[cluster])
           cluster_matrix[x][y] = cluster + 1;
+
+    xs = utility::flatten(machines_clusters);
+    ys = utility::flatten(parts_clusters);
   }
 
   double loss() {
@@ -228,8 +240,6 @@ public:
     constexpr std::size_t neighbors = 10;
 
     double max_loss = loss(), last_loss;
-
-    matrix_t<std::int64_t> solutions;
 
     auto old_machines_clusters = machines_clusters;
     auto old_parts_clusters = parts_clusters;
@@ -295,66 +305,41 @@ public:
     do {
       last_loss = max_loss;
 
-      swap<false>();
-      swap<true>();
+      swap(machines_clusters);
+      swap(parts_clusters);
 
       max_loss = std::max(max_loss, loss());
     } while (1.0 - last_loss / max_loss > eps);
   }
 
-  template <bool Machines> void swap() {
+  void swap(matrix_t<std::size_t> &clusters_vector) {
     double max_loss = loss(), last_loss, current_loss;
 
-    std::int64_t new_cluster1, new_cluster2, i, j;
-
-    std::reference_wrapper<matrix_t<std::size_t>> clusters_vector =
-        machines_clusters;
-
-    if constexpr (!Machines)
-      clusters_vector = parts_clusters;
-
+    std::uint64_t *i, *j;
     do {
       last_loss = max_loss;
-      i = j = new_cluster1 = new_cluster2 = -1;
+      i = j = nullptr;
 
-      for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1) {
-
-        if (clusters_vector.get()[cluster1].size() == 1)
-          continue;
-
+      for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1)
         for (std::size_t cluster2 = cluster1 + 1; cluster2 < clusters;
-             ++cluster2) {
+             ++cluster2)
+          for (auto &x : clusters_vector[cluster1])
+            for (auto &y : clusters_vector[cluster2]) {
 
-          if (clusters_vector.get()[cluster2].size() == 1)
-            continue;
-
-          for (std::size_t x = 0; x < clusters_vector.get()[cluster1].size();
-               ++x)
-            for (std::size_t y = 0; y < clusters_vector.get()[cluster2].size();
-                 ++y) {
-
-              std::swap(clusters_vector.get()[cluster1][x],
-                        clusters_vector.get()[cluster2][y]);
+              std::swap(x, y);
 
               current_loss = loss();
               if (current_loss > max_loss) {
-                i = x;
-                j = y;
-                new_cluster1 = cluster1;
-                new_cluster2 = cluster2;
-
+                i = &x;
+                j = &y;
                 max_loss = current_loss;
               }
 
-              std::swap(clusters_vector.get()[cluster1][x],
-                        clusters_vector.get()[cluster2][y]);
+              std::swap(x, y);
             }
-        }
-      }
 
-      if (i != -1)
-        std::swap(clusters_vector.get()[new_cluster1][i],
-                  clusters_vector.get()[new_cluster2][j]);
+      if (i != nullptr)
+        std::swap(*i, *j);
 
     } while (1.0 - last_loss / max_loss > eps);
   }
@@ -491,7 +476,7 @@ public:
 
     for (int i = 0; i < n; ++i)
       for (int k = 0; k < m; ++k) {
-        std::size_t cluster_id = cluster_matrix[i][k];
+        std::size_t cluster_id = cluster_matrix[xs[i]][ys[k]];
 
         sf::RectangleShape rect(sf::Vector2f(size_i, size_k));
 
@@ -503,7 +488,7 @@ public:
         rect.setFillColor(colors[cluster_id]);
         window.draw(rect);
 
-        if (matrix[i][k]) {
+        if (matrix[xs[i]][ys[k]]) {
           sf::CircleShape circle;
 
           circle.setFillColor(sf::Color::Black);
@@ -529,6 +514,8 @@ private:
   std::size_t clusters;
   matrix_t<std::size_t> machines_clusters;
   matrix_t<std::size_t> parts_clusters;
+  indices_t xs;
+  indices_t ys;
 
   sf::RenderWindow &window;
 
