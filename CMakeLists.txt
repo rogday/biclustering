@@ -10,6 +10,10 @@ set(SFML_STATIC_LIBRARIES TRUE)
 set(SFML_DIR "thirdparty/SFML/lib/cmake/SFML")
 find_package(SFML COMPONENTS graphics window system REQUIRED)
 
-set(TARGET_SOURCES biclustering.cpp)
-add_executable(biclustering ${TARGET_SOURCES})
+set(BICLUSTERING biclustering.cpp)
+set(GENETIC genetic.cpp)
+
+add_executable(biclustering ${BICLUSTERING})
 target_link_libraries(biclustering sfml-graphics sfml-window sfml-system)
+
+add_executable(genetic ${GENETIC})
