@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <iomanip>
 #include <functional>
+#include <valarray>
 
 /*
 Params to tune:
@@ -26,12 +27,12 @@ Params to tune:
 class genetic_t {
 public:
   using gene_t = std::uint64_t;
-  using chromosome_t = std::vector<gene_t>;
+  using chromosome_t = std::valarray<gene_t>;
   using population_t = std::vector<chromosome_t>;
 
   struct settings_t {
-    std::uint64_t n;         // amount of genes
-    std::uint64_t mutatable; // mutable genes
+    std::uint64_t n;  // amount of genes
+    double mutatable; // mutable genes probability
     std::uint64_t population_size;
 
     chromosome_t restrictions;
@@ -41,16 +42,14 @@ public:
   };
 
 private:
-  std::function<double(chromosome_t &, std::string &)> fitness;
+  std::function<double(chromosome_t &)> fitness;
   settings_t settings;
-  std::string file;
 
   static std::mt19937 generator;
 
 public:
-  genetic_t(std::function<double(chromosome_t &, std::string &)> fitness,
-            settings_t settings, std::string file)
-      : fitness(fitness), settings(settings), file(file) {}
+  genetic_t(std::function<double(chromosome_t &)> fitness, settings_t settings)
+      : fitness(fitness), settings(settings) {}
 
   void run(std::size_t iterations) {
     auto population = initial_population();
@@ -88,39 +87,36 @@ private:
   }
 
   chromosome_t mutation(chromosome_t &&chromosome) {
-    std::vector<std::size_t> indices(settings.n);
-    std::iota(std::begin(indices), std::end(indices), 0);
-    std::shuffle(std::begin(indices), std::end(indices), generator);
+    std::discrete_distribution<std::size_t> distr(
+        {1.0 - settings.mutatable, settings.mutatable});
 
-    for (std::size_t i = 0; i < settings.mutatable; ++i)
-      chromosome[indices[i]] = mutator(indices[i]);
+    for (std::size_t i = 0; i < std::size(chromosome); ++i)
+      if (distr(generator))
+        chromosome[i] = mutator(i);
+
     return chromosome;
   }
 
   population_t initial_population() {
     population_t population(settings.population_size);
-    for (auto &chromosome : population)
-      chromosome = random_chromosome();
+    std::generate(std::begin(population), std::end(population),
+                  std::bind(&genetic_t::random_chromosome, this));
     return population;
   }
 
-  std::vector<double> calc_fitness(population_t &population) {
-    std::vector<double> ret(std::size(population));
+  std::valarray<double> calc_fitness(population_t &population) {
+    std::valarray<double> ret(std::size(population));
     for (std::size_t i = 0; i < std::size(ret); ++i)
-      ret[i] = fitness(population[i], file);
+      ret[i] = fitness(population[i]);
+    std::cout << ret.sum() << std::endl;
     return ret;
   }
 
   void derivative_population(population_t &population) {
     auto fitness = calc_fitness(population);
+    fitness /= fitness.sum();
 
-    double sum = std::accumulate(std::begin(fitness), std::end(fitness), 0.0);
-    std::for_each(std::begin(fitness), std::end(fitness),
-                  [sum](double &value) { return value / sum; });
-
-    auto loss = fitness;
-    std::for_each(std::begin(loss), std::end(loss),
-                  [sum](double &value) { return 1.0 - value; });
+    auto loss = 1.0 - fitness;
 
     std::discrete_distribution<std::size_t> fitness_indices(std::begin(fitness),
                                                             std::end(fitness));
@@ -143,9 +139,6 @@ private:
 
 std::mt19937 genetic_t::generator{std::random_device{}()};
 
-constexpr std::uint64_t NOT_IN_CLUSTER = 0;
-constexpr double eps = 1e-12;
-
 namespace utility {
 enum genes_t {
   SHAKINGS = 0,
@@ -154,6 +147,9 @@ enum genes_t {
   SHAKINGS_IN_A_ROW,
   SIZE
 };
+
+constexpr std::uint64_t NOT_IN_CLUSTER = 0;
+constexpr double eps = 1e-12;
 
 std::string filename_from_path(std::string &path) {
   return std::filesystem::path(path).stem().string();
@@ -246,14 +242,6 @@ public:
     matrix.clear();
   }
 
-  void random_clear() {
-    for (auto &v : machines_clusters)
-      v.clear();
-
-    for (auto &v : parts_clusters)
-      v.clear();
-  }
-
   void initial_random() {
     auto ITERATIONS = settings[utility::ITERATIONS];
 
@@ -285,76 +273,6 @@ public:
     parts_clusters = new_parts_clusters;
 
     // std::cout << "clusters: " << clusters << std::endl;
-  }
-
-  void random_pass() {
-    std::size_t i = 0; // i - сколько уже сгенерили для машин
-    std::size_t j = 0; // j - сколько уже сгенерили для частей
-
-    std::size_t cluster_id = 1;
-    clusters = utility::generate_random_value(1ull, n);
-
-    machines_clusters.resize(clusters);
-    parts_clusters.resize(clusters);
-
-    auto set_clusters = [&cluster_id](auto &outer, auto &inner,
-                                      std::size_t start, std::size_t end) {
-      for (std::size_t index = start; index < end; ++index)
-        outer[cluster_id - 1].push_back(inner[index]);
-    };
-
-    auto prepare_indices = [](auto &container, std::size_t size) {
-      container.resize(size);
-      std::iota(std::begin(container), std::end(container), 0);
-      std::shuffle(std::begin(container), std::end(container),
-                   utility::generator);
-    };
-
-    indices_t machines;
-    indices_t parts;
-
-    prepare_indices(machines, n);
-    prepare_indices(parts, m);
-
-    std::normal_distribution dist_machines(n / double(clusters),
-                                           n / double(clusters));
-
-    std::normal_distribution dist_parts(m / double(clusters),
-                                        m / double(clusters));
-
-    for (std::size_t cluster = 1; cluster < clusters; ++cluster, ++cluster_id) {
-
-      std::size_t cluster_size_machines = std::clamp(
-          std::uint64_t(std::round(dist_machines(utility::generator))), 1ull,
-          n - (clusters - cluster) - i);
-
-      std::size_t cluster_size_parts =
-          std::clamp(std::uint64_t(std::round(dist_parts(utility::generator))),
-                     1ull, m - (clusters - cluster) - j);
-
-      set_clusters(machines_clusters, machines, i, i + cluster_size_machines);
-      set_clusters(parts_clusters, parts, j, j + cluster_size_parts);
-
-      i += cluster_size_machines;
-      j += cluster_size_parts;
-    }
-
-    set_clusters(machines_clusters, machines, i, n);
-    set_clusters(parts_clusters, parts, j, m);
-  }
-
-  double loss() {
-    std::size_t zeros_in_solution = 0;
-    std::size_t ones_in_solution = 0;
-
-    for (std::size_t cluster = 0; cluster < clusters; ++cluster)
-      for (std::size_t x : machines_clusters[cluster])
-        for (std::size_t y : parts_clusters[cluster]) {
-          ones_in_solution += matrix[x][y];
-          zeros_in_solution += !matrix[x][y];
-        }
-
-    return ones_in_solution / double(ones_overall + zeros_in_solution);
   }
 
   void optimize() {
@@ -413,114 +331,32 @@ public:
       }
 
       set_current(flag);
-    } while (1.0 - last_loss / max_loss > eps || iterations--);
+    } while (1.0 - last_loss / max_loss > utility::eps || iterations--);
 
     std::cout << "clusters: " << clusters << ", loss: " << max_loss
-              << ", test: " << loss() << std::endl;
+              << std::endl;
   }
 
-  void local_search() {
-    double max_loss = std::numeric_limits<double>::lowest(), last_loss;
+  void random_clear() {
+    for (auto &v : machines_clusters)
+      v.clear();
 
-    matrix_t<std::size_t> *first = &machines_clusters;
-    matrix_t<std::size_t> *second = &parts_clusters;
-
-    if (settings[utility::CLUSTERING_PRINCIPLE] != 0)
-      std::swap(first, second);
-
-    do {
-      last_loss = max_loss;
-
-      swap(*first);
-      swap(*second);
-
-      max_loss = std::max(max_loss, loss());
-    } while (1.0 - last_loss / max_loss > eps);
+    for (auto &v : parts_clusters)
+      v.clear();
   }
 
-  void swap(matrix_t<std::size_t> &clusters_vector) {
-    double max_loss = loss(), last_loss, current_loss;
+  double loss() {
+    std::size_t zeros_in_solution = 0;
+    std::size_t ones_in_solution = 0;
 
-    std::uint64_t *i, *j;
-    do {
-      last_loss = max_loss;
-      i = j = nullptr;
+    for (std::size_t cluster = 0; cluster < clusters; ++cluster)
+      for (std::size_t x : machines_clusters[cluster])
+        for (std::size_t y : parts_clusters[cluster]) {
+          ones_in_solution += matrix[x][y];
+          zeros_in_solution += !matrix[x][y];
+        }
 
-      for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1)
-        for (std::size_t cluster2 = cluster1 + 1; cluster2 < clusters;
-             ++cluster2)
-          for (auto &x : clusters_vector[cluster1])
-            for (auto &y : clusters_vector[cluster2]) {
-
-              std::swap(x, y);
-
-              current_loss = loss();
-              if (current_loss > max_loss) {
-                i = &x;
-                j = &y;
-                max_loss = current_loss;
-              }
-
-              std::swap(x, y);
-            }
-
-      if (i != nullptr)
-        std::swap(*i, *j);
-
-    } while (1.0 - last_loss / max_loss > eps);
-  }
-
-  void split_pass() {
-    std::int64_t cluster = utility::generate_random_value(0, clusters - 1);
-
-    if (machines_clusters[cluster].size() > 1 &&
-        parts_clusters[cluster].size() > 1) {
-      std::int64_t x = utility::generate_random_value(
-          1, machines_clusters[cluster].size() - 1);
-
-      std::int64_t y =
-          utility::generate_random_value(1, parts_clusters[cluster].size() - 1);
-
-      split_apply(cluster, x, y);
-    }
-  }
-
-  void split_apply(std::size_t cluster, std::size_t x, std::size_t y) {
-    split(cluster, x, y);
-    ++clusters;
-  }
-
-  void merge_pass() {
-
-    if (clusters < 2)
-      return;
-
-    std::int64_t cluster1 = utility::generate_random_value(0, clusters - 2);
-    std::int64_t cluster2 =
-        utility::generate_random_value(cluster1 + 1, clusters - 1);
-
-    merge_apply(cluster1, cluster2);
-  }
-
-  void merge_apply(std::size_t cluster1, std::size_t cluster2) {
-    merge(cluster1, cluster2);
-    std::swap(machines_clusters[cluster2], machines_clusters.back());
-    std::swap(parts_clusters[cluster2], parts_clusters.back());
-    machines_clusters.pop_back();
-    parts_clusters.pop_back();
-    --clusters;
-  }
-
-  void merge(std::size_t cluster1, std::size_t cluster2) {
-    utility::append_clear(machines_clusters[cluster1],
-                          machines_clusters[cluster2]);
-    utility::append_clear(parts_clusters[cluster1], parts_clusters[cluster2]);
-  }
-
-  void split(std::size_t cluster, std::size_t i, std::size_t j) {
-    utility::split(machines_clusters[cluster], machines_clusters.emplace_back(),
-                   i);
-    utility::split(parts_clusters[cluster], parts_clusters.emplace_back(), j);
+    return ones_in_solution / double(ones_overall + zeros_in_solution);
   }
 
   void read_solution(std::string &path) {
@@ -576,6 +412,167 @@ public:
   }
 
 private:
+  void random_pass() {
+    std::size_t i = 0; // i - сколько уже сгенерили для машин
+    std::size_t j = 0; // j - сколько уже сгенерили для частей
+
+    std::size_t cluster_id = 1;
+    clusters = utility::generate_random_value(1ull, n);
+
+    machines_clusters.resize(clusters);
+    parts_clusters.resize(clusters);
+
+    auto set_clusters = [&cluster_id](auto &outer, auto &inner,
+                                      std::size_t start, std::size_t end) {
+      for (std::size_t index = start; index < end; ++index)
+        outer[cluster_id - 1].push_back(inner[index]);
+    };
+
+    auto prepare_indices = [](auto &container, std::size_t size) {
+      container.resize(size);
+      std::iota(std::begin(container), std::end(container), 0);
+      std::shuffle(std::begin(container), std::end(container),
+                   utility::generator);
+    };
+
+    indices_t machines;
+    indices_t parts;
+
+    prepare_indices(machines, n);
+    prepare_indices(parts, m);
+
+    std::normal_distribution dist_machines(n / double(clusters),
+                                           n / double(clusters));
+
+    std::normal_distribution dist_parts(m / double(clusters),
+                                        m / double(clusters));
+
+    for (std::size_t cluster = 1; cluster < clusters; ++cluster, ++cluster_id) {
+
+      std::size_t cluster_size_machines = std::clamp(
+          std::uint64_t(std::round(dist_machines(utility::generator))), 1ull,
+          n - (clusters - cluster) - i);
+
+      std::size_t cluster_size_parts =
+          std::clamp(std::uint64_t(std::round(dist_parts(utility::generator))),
+                     1ull, m - (clusters - cluster) - j);
+
+      set_clusters(machines_clusters, machines, i, i + cluster_size_machines);
+      set_clusters(parts_clusters, parts, j, j + cluster_size_parts);
+
+      i += cluster_size_machines;
+      j += cluster_size_parts;
+    }
+
+    set_clusters(machines_clusters, machines, i, n);
+    set_clusters(parts_clusters, parts, j, m);
+  }
+
+  void local_search() {
+    double max_loss = std::numeric_limits<double>::lowest(), last_loss;
+
+    matrix_t<std::size_t> *first = &machines_clusters;
+    matrix_t<std::size_t> *second = &parts_clusters;
+
+    if (settings[utility::CLUSTERING_PRINCIPLE] != 0)
+      std::swap(first, second);
+
+    do {
+      last_loss = max_loss;
+
+      swap(*first);
+      swap(*second);
+
+      max_loss = std::max(max_loss, loss());
+    } while (1.0 - last_loss / max_loss > utility::eps);
+  }
+
+  void swap(matrix_t<std::size_t> &clusters_vector) {
+    double max_loss = loss(), last_loss, current_loss;
+
+    std::uint64_t *i, *j;
+    do {
+      last_loss = max_loss;
+      i = j = nullptr;
+
+      for (std::size_t cluster1 = 0; cluster1 < clusters; ++cluster1)
+        for (std::size_t cluster2 = cluster1 + 1; cluster2 < clusters;
+             ++cluster2)
+          for (auto &x : clusters_vector[cluster1])
+            for (auto &y : clusters_vector[cluster2]) {
+
+              std::swap(x, y);
+
+              current_loss = loss();
+              if (current_loss > max_loss) {
+                i = &x;
+                j = &y;
+                max_loss = current_loss;
+              }
+
+              std::swap(x, y);
+            }
+
+      if (i != nullptr)
+        std::swap(*i, *j);
+
+    } while (1.0 - last_loss / max_loss > utility::eps);
+  }
+
+  void split_pass() {
+    std::int64_t cluster = utility::generate_random_value(0, clusters - 1);
+
+    if (machines_clusters[cluster].size() > 1 &&
+        parts_clusters[cluster].size() > 1) {
+      std::int64_t x = utility::generate_random_value(
+          1, machines_clusters[cluster].size() - 1);
+
+      std::int64_t y =
+          utility::generate_random_value(1, parts_clusters[cluster].size() - 1);
+
+      split_apply(cluster, x, y);
+    }
+  }
+
+  void split_apply(std::size_t cluster, std::size_t x, std::size_t y) {
+    split(cluster, x, y);
+    ++clusters;
+  }
+
+  void merge_pass() {
+
+    if (clusters < 2)
+      return;
+
+    std::int64_t cluster1 = utility::generate_random_value(0, clusters - 2);
+    std::int64_t cluster2 =
+        utility::generate_random_value(cluster1 + 1, clusters - 1);
+
+    merge_apply(cluster1, cluster2);
+  }
+
+  void merge_apply(std::size_t cluster1, std::size_t cluster2) {
+    merge(cluster1, cluster2);
+    std::swap(machines_clusters[cluster2], machines_clusters.back());
+    std::swap(parts_clusters[cluster2], parts_clusters.back());
+    machines_clusters.pop_back();
+    parts_clusters.pop_back();
+    --clusters;
+  }
+
+  void merge(std::size_t cluster1, std::size_t cluster2) {
+    utility::append_clear(machines_clusters[cluster1],
+                          machines_clusters[cluster2]);
+    utility::append_clear(parts_clusters[cluster1], parts_clusters[cluster2]);
+  }
+
+  void split(std::size_t cluster, std::size_t i, std::size_t j) {
+    utility::split(machines_clusters[cluster], machines_clusters.emplace_back(),
+                   i);
+    utility::split(parts_clusters[cluster], parts_clusters.emplace_back(), j);
+  }
+
+private:
   genetic_t::chromosome_t settings;
 
   std::int64_t ones_overall = 0;
@@ -604,7 +601,7 @@ int main() {
 
   genetic_t::settings_t settings;
   settings.n = SIZE;
-  settings.mutatable = static_cast<std::uint64_t>(settings.n * 0.3);
+  settings.mutatable = 1.0 / SIZE;
   settings.population_size = 15;
   settings.new_population_percentage = 0.7;
   settings.mutation_probability = 0.2;
@@ -619,15 +616,20 @@ int main() {
 
   auto input_files = get_files("../input");
 
-  auto fitness = [](genetic_t::chromosome_t &chromosome, std::string &file) {
+  auto fitness = [&input_files](genetic_t::chromosome_t &chromosome) {
     biclustering_solver_t biclustering_solver(chromosome);
-    biclustering_solver.parse(file);
+    biclustering_solver.parse(input_files[0]);
     biclustering_solver.initial_random();
     biclustering_solver.optimize();
+
+    for (auto &val : chromosome)
+      std::cout << val << " ";
+    std::cout << std::endl;
+
     return biclustering_solver.loss();
   };
 
-  genetic_t genetic_algo(fitness, settings, input_files[0]);
+  genetic_t genetic_algo(fitness, settings);
   genetic_algo.run(20);
 
   return 0;
