@@ -16,21 +16,21 @@ int main() {
   settings.mutation_probability = 0.2;
 
   chromosome_t restrictions(settings.n);
-  restrictions[SHAKINGS] = 20;
-  restrictions[ITERATIONS] = 50'000;
+  restrictions[SHAKINGS] = 50;
+  restrictions[ITERATIONS] = 100'000;
   restrictions[CLUSTERING_PRINCIPLE] = 1;
-  restrictions[SHAKINGS_IN_A_ROW] = 10;
 
   settings.restrictions = restrictions;
 
   auto input_files = get_files("../input");
 
-  auto fitness = [&input_files](chromosome_t &settings) {
+  auto fitness = [](std::string &filename, chromosome_t &settings) {
     biclustering_solver_t biclustering_solver(settings);
-    biclustering_solver.parse(input_files[0]);
+    biclustering_solver.parse(filename);
     biclustering_solver.initial_random();
     biclustering_solver.optimize();
 
+    std::cout << "parameters: ";
     for (auto &val : settings)
       std::cout << val << " ";
     std::cout << std::endl;
@@ -38,8 +38,12 @@ int main() {
     return biclustering_solver.loss();
   };
 
-  genetic_t<chromosome_t> genetic_algo(fitness, settings);
-  genetic_algo.run(20);
+  for (auto &filename : input_files) {
+    std::cout << filename << std::endl;
+    genetic_t<chromosome_t> genetic_algo(
+        std::bind(fitness, filename, std::placeholders::_1), settings);
+    genetic_algo.run(20);
+  }
 
   return 0;
 }

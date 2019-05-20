@@ -129,7 +129,8 @@ void biclustering_solver_t::optimize() {
   } while (1.0 - last_loss / max_loss > utility::eps || iterations--);
 
   construct_cluster_matrix();
-  std::cout << "clusters: " << clusters << ", loss: " << max_loss << std::endl;
+  // std::cout << "clusters: " << clusters << ", loss: " << max_loss <<
+  // std::endl;
 }
 
 void biclustering_solver_t::random_clear() {

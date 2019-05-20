@@ -8,13 +8,7 @@
 #include <random>
 
 namespace utility {
-enum genes_t {
-  SHAKINGS = 0,
-  ITERATIONS,
-  CLUSTERING_PRINCIPLE,
-  SHAKINGS_IN_A_ROW,
-  SIZE
-};
+enum genes_t { SHAKINGS = 0, ITERATIONS, CLUSTERING_PRINCIPLE, SIZE };
 
 constexpr std::uint64_t NOT_IN_CLUSTER = 0;
 constexpr double eps = 1e-12;

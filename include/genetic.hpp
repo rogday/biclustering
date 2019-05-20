@@ -82,7 +82,7 @@ private:
     return child;
   }
 
-  chromosome_t mutation(chromosome_t &&chromosome) {
+  chromosome_t mutation(chromosome_t chromosome) {
     std::discrete_distribution<std::size_t> distr(
         {1.0 - settings.mutatable, settings.mutatable});
 
@@ -104,7 +104,7 @@ private:
     std::valarray<double> ret(std::size(population));
     for (std::size_t i = 0; i < std::size(ret); ++i)
       ret[i] = fitness(population[i]);
-    std::cout << ret.sum() << std::endl;
+    std::cout << "average: " << ret.sum() / std::size(population) << std::endl;
     return ret;
   }
 
@@ -119,6 +119,9 @@ private:
     std::discrete_distribution<std::size_t> loss_indices(std::begin(loss),
                                                          std::end(loss));
 
+    std::discrete_distribution<std::size_t> mutant(
+        {1.0 - settings.mutation_probability, settings.mutation_probability});
+
     std::vector<chromosome_t> parents(
         2 * static_cast<std::size_t>(settings.n *
                                      settings.new_population_percentage));
@@ -127,8 +130,12 @@ private:
       parents[i] = population[fitness_indices(generator)];
 
     for (std::size_t i = 0; i < std::size(parents); i += 2) {
-      auto child = mutation(crossover(parents[i], parents[i + 1]));
+      auto child = crossover(parents[i], parents[i + 1]);
       population[loss_indices(generator)] = child;
     }
+
+    for (auto &dude : population)
+      if (mutant(generator))
+        dude = mutation(dude);
   }
 };
